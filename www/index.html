@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>PiCar Remote</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="PiCar">
+<meta name="theme-color" content="#0b0f14">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='40' fill='%230b0f14'/%3E%3Ccircle cx='90' cy='90' r='48' fill='none' stroke='%2334d399' stroke-width='12'/%3E%3Ccircle cx='90' cy='90' r='16' fill='%2334d399'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --bg:#0b0f14; --panel:#131a22; --panel2:#1b2430; --line:#263241;
+    --text:#e6edf3; --muted:#8b98a8; --accent:#34d399; --accent2:#60a5fa;
+    --warn:#fbbf24; --danger:#f87171; --on:#34d399;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans KR",sans-serif;overflow:hidden;touch-action:none;overscroll-behavior:none}
+  body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+
+  #app{position:fixed;inset:0;display:grid;grid-template-rows:44px 1fr;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+
+  /* top bar */
+  #bar{display:flex;align-items:center;gap:10px;padding:0 12px;background:var(--panel);border-bottom:1px solid var(--line);font-size:13px}
+  #bar .title{font-weight:700;letter-spacing:.3px}
+  #status{display:flex;align-items:center;gap:6px;color:var(--muted)}
+  #status .dot{width:8px;height:8px;border-radius:50%;background:var(--danger);box-shadow:0 0 0 0 rgba(248,113,113,.5)}
+  #status.on .dot{background:var(--on);animation:pulse 2s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(52,211,153,.5)}70%{box-shadow:0 0 0 8px rgba(52,211,153,0)}100%{box-shadow:0 0 0 0 rgba(52,211,153,0)}}
+  #speedWrap{display:flex;align-items:center;gap:8px;margin-left:auto;color:var(--muted)}
+  #speedWrap input{width:110px;accent-color:var(--accent)}
+  #speedVal{min-width:34px;text-align:right;color:var(--text);font-variant-numeric:tabular-nums}
+  .iconbtn{width:34px;height:34px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);display:grid;place-items:center;font-size:16px}
+  .iconbtn.active{border-color:var(--accent);color:var(--accent)}
+
+  /* main */
+  #main{position:relative;display:grid;grid-template-columns:minmax(150px,24%) 1fr minmax(170px,26%);gap:8px;padding:8px;min-height:0}
+  .side{display:flex;flex-direction:column;gap:8px;min-height:0}
+
+  /* video */
+  #videoWrap{position:relative;background:#000;border-radius:14px;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center}
+  #video{width:100%;height:100%;object-fit:contain;display:block}
+  #videoMsg{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:13px;background:rgba(0,0,0,.4);text-align:center;padding:12px}
+  #videoMsg.hide{display:none}
+
+  /* joystick */
+  #joyWrap{flex:1;display:grid;place-items:center;min-height:0}
+  #joy{position:relative;width:min(100%,160px);aspect-ratio:1;border-radius:50%;background:radial-gradient(circle at 50% 50%,var(--panel2),var(--panel));border:1px solid var(--line);touch-action:none}
+  #joy .arrow{position:absolute;color:var(--muted);font-size:14px;opacity:.6}
+  #joy .arrow.n{top:8px;left:50%;transform:translateX(-50%)}
+  #joy .arrow.s{bottom:8px;left:50%;transform:translateX(-50%)}
+  #joy .arrow.w{left:10px;top:50%;transform:translateY(-50%)}
+  #joy .arrow.e{right:10px;top:50%;transform:translateY(-50%)}
+  #knob{position:absolute;left:50%;top:50%;width:42%;height:42%;border-radius:50%;background:linear-gradient(145deg,#2a3645,#1b2430);border:2px solid var(--line);transform:translate(-50%,-50%);transition:transform .08s,border-color .1s;box-shadow:0 4px 14px rgba(0,0,0,.5)}
+  #joy.active #knob{border-color:var(--accent)}
+  #joyLabel{text-align:center;color:var(--muted);font-size:12px;height:16px}
+
+  /* buttons */
+  .grid{display:grid;gap:6px}
+  .btn{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:10px;padding:0 6px;font-size:12px;font-weight:600;min-height:40px;display:grid;place-items:center;line-height:1.15;text-align:center}
+  .btn:active,.btn.pressed{background:#22304a;border-color:var(--accent2)}
+  .btn.on{background:rgba(52,211,153,.14);border-color:var(--accent);color:var(--accent)}
+  .btn.danger{border-color:#5a2a2a}
+  .btn.danger:active{background:#4a1f1f;border-color:var(--danger)}
+  .label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin:2px 0 0 2px}
+  #armGrid{grid-template-columns:repeat(2,1fr)}
+  #stopBtn{min-height:46px;font-size:14px}
+
+  /* modes drawer */
+  #modes{position:absolute;left:8px;right:8px;bottom:8px;background:rgba(19,26,34,.96);border:1px solid var(--line);border-radius:14px;padding:10px;transform:translateY(calc(100% + 12px));transition:transform .2s;backdrop-filter:blur(8px);max-height:70%;overflow:auto;touch-action:pan-y}
+  #modes.open{transform:none}
+  #modes .grid{grid-template-columns:repeat(auto-fill,minmax(110px,1fr))}
+  #modes h4{margin:6px 0 6px;font-size:12px;color:var(--muted);font-weight:600}
+
+  /* settings */
+  #settings{position:absolute;inset:0;background:rgba(5,8,12,.85);display:none;place-items:center;z-index:20;touch-action:auto}
+  #settings.open{display:grid}
+  #settings .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;width:min(92%,360px)}
+  #settings h3{margin:0 0 10px;font-size:15px}
+  #settings label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px}
+  #settings input{width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:15px;-webkit-user-select:text;user-select:text}
+  #settings .row{display:flex;gap:8px;margin-top:14px}
+  #settings .row .btn{flex:1;min-height:42px}
+  #settings .hint{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.5}
+
+  /* portrait hint */
+  #rotate{position:absolute;inset:0;z-index:30;background:var(--bg);display:none;place-items:center;text-align:center;color:var(--muted);font-size:14px;line-height:1.6}
+  @media (orientation:portrait){ #rotate{display:grid} }
+
+  #toast{position:absolute;top:52px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);padding:6px 12px;border-radius:999px;font-size:12px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:25}
+  #toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="bar">
+    <span class="title">PiCar Remote</span>
+    <span id="status"><span class="dot"></span><span id="statusText">연결 안 됨</span></span>
+    <div id="speedWrap">
+      <span>속도</span>
+      <input id="speed" type="range" min="0" max="100" value="100">
+      <span id="speedVal">100</span>
+    </div>
+    <button class="iconbtn" id="modesBtn" title="모드">☰</button>
+    <button class="iconbtn" id="settingsBtn" title="설정">⚙</button>
+  </div>
+
+  <div id="main">
+    <!-- left: drive -->
+    <div class="side">
+      <div class="label">주행</div>
+      <div id="joyWrap">
+        <div id="joy">
+          <span class="arrow n">▲</span><span class="arrow s">▼</span><span class="arrow w">◀</span><span class="arrow e">▶</span>
+          <div id="knob"></div>
+        </div>
+      </div>
+      <div id="joyLabel">정지</div>
+      <button class="btn danger" id="stopBtn">■ 전체 정지</button>
+    </div>
+
+    <!-- center: video -->
+    <div id="videoWrap">
+      <img id="video" alt="camera">
+      <div id="videoMsg">카메라 연결 중…</div>
+    </div>
+
+    <!-- right: arm -->
+    <div class="side">
+      <div class="label">로봇팔 · 카메라</div>
+      <div class="grid" id="armGrid">
+        <button class="btn hold" data-down="armup"   data-up="armstop">팔 올리기</button>
+        <button class="btn hold" data-down="handup"  data-up="HAstop">손목 올리기</button>
+        <button class="btn hold" data-down="armdown" data-up="armstop">팔 내리기</button>
+        <button class="btn hold" data-down="handdown" data-up="HAstop">손목 내리기</button>
+        <button class="btn hold" data-down="grab"    data-up="stop">집기</button>
+        <button class="btn hold" data-down="loose"   data-up="stop">놓기</button>
+        <button class="btn hold" data-down="lookleft"  data-up="LRstop">◀ 카메라</button>
+        <button class="btn hold" data-down="lookright" data-up="LRstop">카메라 ▶</button>
+      </div>
+      <div class="label">LED · 포트</div>
+      <div class="grid" style="grid-template-columns:repeat(3,1fr)">
+        <button class="btn toggle" data-on="Switch_1_on" data-off="Switch_1_off">P1</button>
+        <button class="btn toggle" data-on="Switch_2_on" data-off="Switch_2_off">P2</button>
+        <button class="btn toggle" data-on="Switch_3_on" data-off="Switch_3_off">P3</button>
+      </div>
+    </div>
+
+    <!-- modes drawer -->
+    <div id="modes">
+      <h4>자동 모드 (하나만 켜세요)</h4>
+      <div class="grid">
+        <button class="btn toggle excl" data-on="motionGet"    data-off="stopCV">물체 감지</button>
+        <button class="btn toggle excl" data-on="automatic"    data-off="automaticOff">자율 주행</button>
+        <button class="btn toggle excl" data-on="trackLine"    data-off="trackLineOff">라인 트래킹</button>
+        <button class="btn toggle excl" data-on="keepDistance" data-off="keepDistanceOff">거리 유지</button>
+        <button class="btn toggle excl" data-on="findColor"    data-off="stopCV">색상 추적</button>
+      </div>
+      <h4>효과</h4>
+      <div class="grid">
+        <button class="btn toggle" data-on="police" data-off="policeOff">경광등</button>
+        <button class="btn toggle" data-on="speech" data-off="speechOff">음성</button>
+        <button class="btn once" data-cmd="scan">레이더 스캔</button>
+        <button class="btn once" data-cmd="home">홈 위치</button>
+      </div>
+      <h4>응답 로그</h4>
+      <pre id="log" style="margin:0;font-size:11px;color:var(--muted);max-height:90px;overflow:auto;white-space:pre-wrap"></pre>
+    </div>
+
+    <div id="toast"></div>
+  </div>
+
+  <div id="settings">
+    <div class="card">
+      <h3>로봇 연결 설정</h3>
+      <label>로봇 IP 주소</label>
+      <input id="ipInput" inputmode="decimal" placeholder="예: 192.168.25.119">
+      <label>영상 포트 / 제어 포트</label>
+      <div style="display:flex;gap:8px">
+        <input id="httpPort" inputmode="numeric" placeholder="5000">
+        <input id="wsPort" inputmode="numeric" placeholder="8888">
+      </div>
+      <div class="hint">폰과 로봇이 같은 Wi‑Fi에 있어야 합니다. 저장하면 바로 재연결합니다.</div>
+      <div class="row">
+        <button class="btn" id="cancelBtn">취소</button>
+        <button class="btn on" id="saveBtn">저장 · 연결</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="rotate">📱 → 📱<br>화면을 가로로 돌려주세요<br><small>(화면 회전 잠금을 풀어주세요)</small></div>
+</div>
+
+<script>
+(function(){
+  const $ = s => document.querySelector(s);
+  const $$ = s => [...document.querySelectorAll(s)];
+
+  // ---------- config ----------
+  const defaultHost = (location.hostname && !/^(localhost|127\.|$)/.test(location.hostname)) ? location.hostname : '192.168.25.119';
+  let cfg = { host: defaultHost, httpPort: 5000, wsPort: 8888 };
+  try { Object.assign(cfg, JSON.parse(localStorage.getItem('picar.cfg') || '{}')); } catch(e){}
+
+  // ---------- toast / log ----------
+  const toastEl = $('#toast'); let toastT;
+  function toast(m){ toastEl.textContent = m; toastEl.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(()=>toastEl.classList.remove('show'), 1600); }
+  const logEl = $('#log');
+  function log(m){ logEl.textContent = (String(m).slice(0,200) + '\n' + logEl.textContent).slice(0,2000); }
+
+  // ---------- websocket ----------
+  let ws = null, wsReady = false, retryT = null, lastSent = '';
+  const statusEl = $('#status'), statusText = $('#statusText');
+  function setStatus(on, text){ statusEl.classList.toggle('on', on); statusText.textContent = text; }
+
+  function connect(){
+    clearTimeout(retryT);
+    if (ws) { try { ws.onclose = null; ws.close(); } catch(e){} }
+    wsReady = false;
+    setStatus(false, '연결 중…');
+    try {
+      ws = new WebSocket('ws://' + cfg.host + ':' + cfg.wsPort);
+    } catch(e) { setStatus(false, '주소 오류'); retryT = setTimeout(connect, 3000); return; }
+    ws.onopen = () => { ws.send('admin:123456'); wsReady = true; setStatus(true, '연결됨'); send('wsB ' + speedEl.value); };
+    ws.onmessage = ev => { let d = ev.data; try { d = JSON.parse(ev.data); d = (d.title||'') + ' ' + (typeof d.data==='object'? JSON.stringify(d.data) : (d.data ?? '')); } catch(e){} log(d); };
+    ws.onerror = () => {};
+    ws.onclose = () => { wsReady = false; setStatus(false, '끊김 · 재연결 중'); retryT = setTimeout(connect, 2000); };
+  }
+  function send(cmd){
+    if (!wsReady) { toast('로봇에 연결되지 않았습니다'); return false; }
+    try { ws.send(cmd); lastSent = cmd; return true; } catch(e){ return false; }
+  }
+
+  // ---------- video ----------
+  const video = $('#video'), videoMsg = $('#videoMsg');
+  let videoRetry;
+  function loadVideo(){
+    clearTimeout(videoRetry);
+    videoMsg.classList.remove('hide'); videoMsg.textContent = '카메라 연결 중…';
+    video.src = 'http://' + cfg.host + ':' + cfg.httpPort + '/video_feed?r=' + Math.random();
+  }
+  video.onload = () => videoMsg.classList.add('hide');
+  video.onerror = () => { videoMsg.classList.remove('hide'); videoMsg.textContent = '카메라 영상을 불러올 수 없습니다\n(' + cfg.host + ':' + cfg.httpPort + ')'; videoRetry = setTimeout(loadVideo, 3000); };
+
+  // ---------- speed ----------
+  const speedEl = $('#speed'), speedVal = $('#speedVal'); let speedT;
+  speedEl.addEventListener('input', () => { speedVal.textContent = speedEl.value; clearTimeout(speedT); speedT = setTimeout(()=>send('wsB ' + speedEl.value), 250); });
+
+  // ---------- joystick ----------
+  const joy = $('#joy'), knob = $('#knob'), joyLabel = $('#joyLabel');
+  const DIR = { forward:{stop:'DS', label:'전진'}, backward:{stop:'DS', label:'후진'}, left:{stop:'TS', label:'좌회전'}, right:{stop:'TS', label:'우회전'} };
+  let curDir = null, joyId = null;
+  function setDir(d){
+    if (d === curDir) return;
+    if (curDir) send(DIR[curDir].stop);
+    curDir = d;
+    if (d) send(d);
+    joyLabel.textContent = d ? DIR[d].label : '정지';
+  }
+  function joyMove(x, y){
+    const r = joy.getBoundingClientRect(), cx = r.left + r.width/2, cy = r.top + r.height/2, R = r.width/2;
+    let dx = x - cx, dy = y - cy, dist = Math.hypot(dx, dy);
+    const max = R * 0.55; if (dist > max) { dx *= max/dist; dy *= max/dist; dist = max; }
+    knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+    if (dist < R * 0.18) { setDir(null); return; }
+    const a = Math.atan2(-dy, dx) * 180 / Math.PI; // 0=right, 90=up
+    let d;
+    if (a > 45 && a <= 135) d = 'forward';
+    else if (a > -135 && a <= -45) d = 'backward';
+    else if (a > 135 || a <= -135) d = 'left';
+    else d = 'right';
+    setDir(d);
+  }
+  function joyEnd(){ joyId = null; joy.classList.remove('active'); knob.style.transform = 'translate(-50%,-50%)'; setDir(null); }
+  joy.addEventListener('pointerdown', e => { if (joyId !== null) return; joyId = e.pointerId; joy.setPointerCapture(e.pointerId); joy.classList.add('active'); joyMove(e.clientX, e.clientY); e.preventDefault(); });
+  joy.addEventListener('pointermove', e => { if (e.pointerId !== joyId) return; joyMove(e.clientX, e.clientY); e.preventDefault(); });
+  joy.addEventListener('pointerup', e => { if (e.pointerId === joyId) joyEnd(); });
+  joy.addEventListener('pointercancel', e => { if (e.pointerId === joyId) joyEnd(); });
+  joy.addEventListener('lostpointercapture', e => { if (e.pointerId === joyId) joyEnd(); });
+
+  // ---------- hold buttons ----------
+  $$('.btn.hold').forEach(b => {
+    let active = false;
+    const down = e => { if (active) return; active = true; b.classList.add('pressed'); b.setPointerCapture?.(e.pointerId); send(b.dataset.down); e.preventDefault(); };
+    const up = () => { if (!active) return; active = false; b.classList.remove('pressed'); send(b.dataset.up); };
+    b.addEventListener('pointerdown', down);
+    b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('lostpointercapture', up);
+    b.addEventListener('contextmenu', e => e.preventDefault());
+  });
+
+  // ---------- toggle buttons ----------
+  $$('.btn.toggle').forEach(b => {
+    b.addEventListener('click', () => {
+      const on = !b.classList.contains('on');
+      if (on && b.classList.contains('excl')) $$('.btn.toggle.excl.on').forEach(o => { o.classList.remove('on'); send(o.dataset.off); });
+      if (send(on ? b.dataset.on : b.dataset.off)) b.classList.toggle('on', on);
+    });
+  });
+  $$('.btn.once').forEach(b => b.addEventListener('click', () => send(b.dataset.cmd)));
+
+  // ---------- stop all ----------
+  $('#stopBtn').addEventListener('click', () => {
+    joyEnd(); ['DS','TS','armstop','HAstop','stop','LRstop'].forEach(send);
+    $$('.btn.toggle.excl.on').forEach(o => { o.classList.remove('on'); send(o.dataset.off); });
+    toast('전체 정지');
+  });
+
+  // ---------- modes drawer ----------
+  const modes = $('#modes'), modesBtn = $('#modesBtn');
+  modesBtn.addEventListener('click', () => { modes.classList.toggle('open'); modesBtn.classList.toggle('active', modes.classList.contains('open')); });
+
+  // ---------- settings ----------
+  const settings = $('#settings'), ipInput = $('#ipInput'), httpPort = $('#httpPort'), wsPort = $('#wsPort');
+  function openSettings(){ ipInput.value = cfg.host; httpPort.value = cfg.httpPort; wsPort.value = cfg.wsPort; settings.classList.add('open'); }
+  $('#settingsBtn').addEventListener('click', openSettings);
+  $('#cancelBtn').addEventListener('click', () => settings.classList.remove('open'));
+  $('#saveBtn').addEventListener('click', () => {
+    cfg.host = ipInput.value.trim() || cfg.host;
+    cfg.httpPort = parseInt(httpPort.value) || 5000;
+    cfg.wsPort = parseInt(wsPort.value) || 8888;
+    try { localStorage.setItem('picar.cfg', JSON.stringify(cfg)); } catch(e){}
+    settings.classList.remove('open'); connect(); loadVideo(); toast('재연결 중: ' + cfg.host);
+  });
+
+  // ---------- safety: release everything if page hidden ----------
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { joyEnd(); ['DS','TS','armstop','HAstop','stop','LRstop'].forEach(c => { try{ ws && wsReady && ws.send(c);}catch(e){} }); } });
+  window.addEventListener('blur', joyEnd);
+
+  // ---------- keyboard (PC 테스트용) ----------
+  const keyMap = { w:'forward', s:'backward', a:'left', d:'right' };
+  document.addEventListener('keydown', e => { const d = keyMap[e.key.toLowerCase()]; if (d && !e.repeat) setDir(d); });
+  document.addEventListener('keyup', e => { const d = keyMap[e.key.toLowerCase()]; if (d && curDir === d) setDir(null); });
+
+  connect(); loadVideo();
+})();
+</script>
+</body>
+</html>

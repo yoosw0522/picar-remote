@@ -1,0 +1,17 @@
+{
+  "name": "picar-remote",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Adeept PiCar-Pro 원격 조종 앱",
+  "scripts": {
+    "android:add": "cap add android && node scripts/patch-android.js",
+    "android:sync": "cap sync android"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/core": "^6.1.2"
+  }
+}
