@@ -98,6 +98,7 @@
   <div id="bar">
     <span class="title">PiCar Remote</span>
     <span id="status"><span class="dot"></span><span id="statusText">연결 안 됨</span></span>
+    <span id="sysInfo" style="color:var(--muted);font-variant-numeric:tabular-nums"></span>
     <div id="speedWrap">
       <span>속도</span>
       <input id="speed" type="range" min="0" max="100" value="100">
@@ -150,9 +151,9 @@
 
     <!-- modes drawer -->
     <div id="modes">
-      <h4>자동 모드 (하나만 켜세요)</h4>
+      <h4>자동 모드 (하나만 켜세요) — 물체 감지는 로봇 시작 시 기본 켜짐</h4>
       <div class="grid">
-        <button class="btn toggle excl" data-on="motionGet"    data-off="stopCV">물체 감지</button>
+        <button class="btn toggle excl on" id="objDetBtn" data-on="motionGet" data-off="stopCV">물체 감지 (YOLO)</button>
         <button class="btn toggle excl" data-on="automatic"    data-off="automaticOff">자율 주행</button>
         <button class="btn toggle excl" data-on="trackLine"    data-off="trackLineOff">라인 트래킹</button>
         <button class="btn toggle excl" data-on="keepDistance" data-off="keepDistanceOff">거리 유지</button>
@@ -211,7 +212,8 @@
 
   // ---------- websocket ----------
   let ws = null, wsReady = false, retryT = null, lastSent = '';
-  const statusEl = $('#status'), statusText = $('#statusText');
+  const statusEl = $('#status'), statusText = $('#statusText'), sysInfo = $('#sysInfo');
+  setInterval(() => { if (wsReady && !document.hidden) { try { ws.send('get_info'); } catch(e){} } }, 5000);
   function setStatus(on, text){ statusEl.classList.toggle('on', on); statusText.textContent = text; }
 
   function connect(){
@@ -222,8 +224,19 @@
     try {
       ws = new WebSocket('ws://' + cfg.host + ':' + cfg.wsPort);
     } catch(e) { setStatus(false, '주소 오류'); retryT = setTimeout(connect, 3000); return; }
-    ws.onopen = () => { ws.send('admin:123456'); wsReady = true; setStatus(true, '연결됨'); send('wsB ' + speedEl.value); };
-    ws.onmessage = ev => { let d = ev.data; try { d = JSON.parse(ev.data); d = (d.title||'') + ' ' + (typeof d.data==='object'? JSON.stringify(d.data) : (d.data ?? '')); } catch(e){} log(d); };
+    ws.onopen = () => { ws.send('admin:123456'); wsReady = true; setStatus(true, '연결됨'); send('wsB ' + speedEl.value); send('get_info'); };
+    ws.onmessage = ev => {
+      let d = ev.data;
+      try {
+        const j = JSON.parse(ev.data);
+        if (j && j.title === 'get_info' && Array.isArray(j.data)) {
+          // [cpu_temp, cpu_use, ram_use]
+          sysInfo.textContent = `CPU ${parseFloat(j.data[0]).toFixed(0)}°C · ${j.data[1]}% · RAM ${j.data[2]}%`;
+        }
+        d = (j.title||'') + ' ' + (typeof j.data==='object'? JSON.stringify(j.data) : (j.data ?? ''));
+      } catch(e){}
+      log(d);
+    };
     ws.onerror = () => {};
     ws.onclose = () => { wsReady = false; setStatus(false, '끊김 · 재연결 중'); retryT = setTimeout(connect, 2000); };
   }
@@ -247,32 +260,41 @@
   const speedEl = $('#speed'), speedVal = $('#speedVal'); let speedT;
   speedEl.addEventListener('input', () => { speedVal.textContent = speedEl.value; clearTimeout(speedT); speedT = setTimeout(()=>send('wsB ' + speedEl.value), 250); });
 
-  // ---------- joystick ----------
+  // ---------- joystick (2축: 세로=전진/후진, 가로=조향, 동시 조합 가능) ----------
   const joy = $('#joy'), knob = $('#knob'), joyLabel = $('#joyLabel');
-  const DIR = { forward:{stop:'DS', label:'전진'}, backward:{stop:'DS', label:'후진'}, left:{stop:'TS', label:'좌회전'}, right:{stop:'TS', label:'우회전'} };
-  let curDir = null, joyId = null;
-  function setDir(d){
-    if (d === curDir) return;
-    if (curDir) send(DIR[curDir].stop);
-    curDir = d;
-    if (d) send(d);
-    joyLabel.textContent = d ? DIR[d].label : '정지';
+  let drive = null, steer = null, joyId = null;   // drive: forward|backward|null, steer: left|right|null
+  function setDrive(d){
+    if (d === drive) return;
+    drive = d;
+    send(d || 'DS');
+    updateJoyLabel();
+  }
+  function setSteer(s){
+    if (s === steer) return;
+    steer = s;
+    send(s || 'TS');
+    updateJoyLabel();
+  }
+  function updateJoyLabel(){
+    const dl = drive === 'forward' ? '전진' : drive === 'backward' ? '후진' : '';
+    const sl = steer === 'left' ? '좌' : steer === 'right' ? '우' : '';
+    joyLabel.textContent = (dl || sl) ? [dl, sl].filter(Boolean).join(' · ') : '정지';
   }
   function joyMove(x, y){
     const r = joy.getBoundingClientRect(), cx = r.left + r.width/2, cy = r.top + r.height/2, R = r.width/2;
     let dx = x - cx, dy = y - cy, dist = Math.hypot(dx, dy);
     const max = R * 0.55; if (dist > max) { dx *= max/dist; dy *= max/dist; dist = max; }
-    knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
-    if (dist < R * 0.18) { setDir(null); return; }
-    const a = Math.atan2(-dy, dx) * 180 / Math.PI; // 0=right, 90=up
-    let d;
-    if (a > 45 && a <= 135) d = 'forward';
-    else if (a > -135 && a <= -45) d = 'backward';
-    else if (a > 135 || a <= -135) d = 'left';
-    else d = 'right';
-    setDir(d);
+    knob.style.transform = `translate(-50%, -50%) translate(${dx}px, ${dy}px)`;
+    // 각 축마다 데드존(히스테리시스): 켜질 땐 35%, 꺼질 땐 20%
+    const nx = dx / max, ny = -dy / max;
+    const ON = 0.35, OFF = 0.20;
+    let d = drive, s = steer;
+    if (ny > ON) d = 'forward'; else if (ny < -ON) d = 'backward'; else if (Math.abs(ny) < OFF) d = null;
+    if (nx > ON) s = 'right';   else if (nx < -ON) s = 'left';     else if (Math.abs(nx) < OFF) s = null;
+    // 전진↔후진처럼 방향이 뒤집힐 땐 서버가 바로 반영하므로 그대로 전송
+    setDrive(d); setSteer(s);
   }
-  function joyEnd(){ joyId = null; joy.classList.remove('active'); knob.style.transform = 'translate(-50%,-50%)'; setDir(null); }
+  function joyEnd(){ joyId = null; joy.classList.remove('active'); knob.style.transform = 'translate(-50%,-50%)'; setDrive(null); setSteer(null); }
   joy.addEventListener('pointerdown', e => { if (joyId !== null) return; joyId = e.pointerId; joy.setPointerCapture(e.pointerId); joy.classList.add('active'); joyMove(e.clientX, e.clientY); e.preventDefault(); });
   joy.addEventListener('pointermove', e => { if (e.pointerId !== joyId) return; joyMove(e.clientX, e.clientY); e.preventDefault(); });
   joy.addEventListener('pointerup', e => { if (e.pointerId === joyId) joyEnd(); });
@@ -327,10 +349,17 @@
   document.addEventListener('visibilitychange', () => { if (document.hidden) { joyEnd(); ['DS','TS','armstop','HAstop','stop','LRstop'].forEach(c => { try{ ws && wsReady && ws.send(c);}catch(e){} }); } });
   window.addEventListener('blur', joyEnd);
 
-  // ---------- keyboard (PC 테스트용) ----------
-  const keyMap = { w:'forward', s:'backward', a:'left', d:'right' };
-  document.addEventListener('keydown', e => { const d = keyMap[e.key.toLowerCase()]; if (d && !e.repeat) setDir(d); });
-  document.addEventListener('keyup', e => { const d = keyMap[e.key.toLowerCase()]; if (d && curDir === d) setDir(null); });
+  // ---------- keyboard (PC 테스트용: W/S 주행, A/D 조향 동시 가능) ----------
+  const driveKeys = { w:'forward', s:'backward' }, steerKeys = { a:'left', d:'right' };
+  document.addEventListener('keydown', e => {
+    if (e.repeat) return; const k = e.key.toLowerCase();
+    if (driveKeys[k]) setDrive(driveKeys[k]); else if (steerKeys[k]) setSteer(steerKeys[k]);
+  });
+  document.addEventListener('keyup', e => {
+    const k = e.key.toLowerCase();
+    if (driveKeys[k] && drive === driveKeys[k]) setDrive(null);
+    else if (steerKeys[k] && steer === steerKeys[k]) setSteer(null);
+  });
 
   connect(); loadVideo();
 })();
